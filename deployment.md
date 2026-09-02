@@ -1,97 +1,70 @@
 # FastAPI Project - Deployment
 
-Deploy the project to [FastAPI Cloud](https://fastapicloud.com) with the included GitHub Actions workflow.
+Deploy the project to [Railway](https://railway.app). The repo ships a `railway.json` (config-as-code) and a root `Dockerfile` so Railway can build and run the backend without extra configuration.
 
-## Create the FastAPI Cloud Application
+## One-Click Deploy
 
-Create an application in FastAPI Cloud and set its [Application Directory](https://fastapicloud.com/docs/builds-and-deployments/application-directory/) to `backend`.
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.app/new?github_url=https://github.com/lNamelessl/fastapi-backend-railway-template)
 
-Connect a PostgreSQL database using the [Neon](https://fastapicloud.com/docs/integrations/neon-integration/) or [Supabase](https://fastapicloud.com/docs/integrations/supabase-integration/) integration. Both integrations configure a `DATABASE_URL` secret automatically. You can also configure `DATABASE_URL` manually for another PostgreSQL provider.
+Clicking the button (or opening `https://railway.app/new?github_url=https://github.com/lNamelessl/fastapi-backend-railway-template`) creates a new Railway project from this repository and prompts you to provision:
 
-## Configure the Application
+* **backend**: this repo, built with the `Dockerfile` and started with the `railway.json` `startCommand`.
+* **PostgreSQL**: a Railway database plugin. Its `DATABASE_URL` reference is injected into the backend automatically.
 
-### Environment Variables
+## What Happens on Deploy
 
-Add these required [environment variables](https://fastapicloud.com/docs/builds-and-deployments/environment-variables/) to the FastAPI Cloud application:
+1. Railway builds the Docker image from the repo root `Dockerfile` (Python 3.14 + [uv](https://docs.astral.sh/uv/)).
+2. On container start, `backend/scripts/prestart.sh` runs **before** the server binds the port. It applies Alembic migrations (`alembic upgrade head`) and seeds the first superuser (`app/initial_data.py`) using `FIRST_SUPERUSER` and `FIRST_SUPERUSER_PASSWORD`.
+3. The server binds to Railway's injected `PORT` environment variable.
+4. Railway polls the `healthcheckPath` (`GET /health`) and marks the deployment healthy once it returns `200`.
 
-* `PROJECT_NAME`: The name of the project, used in the API documentation and emails.
-* `FIRST_SUPERUSER`: The email address of the first superuser.
-* `FRONTEND_HOST`: The public URL of the application, such as the generated `https://your-app.fastapicloud.dev` URL or a custom domain.
+## Environment Variables
 
-To enable emails, add these optional environment variables with values from your email provider:
+The backend service needs these variables:
 
-* `SMTP_HOST`
-* `SMTP_USER`
-* `EMAILS_FROM_EMAIL`
+* `DATABASE_URL`: set it to the database reference `DATABASE_URL=${{Postgres.DATABASE_URL}}` so it always points at your Railway Postgres.
+* `SECRET_KEY`: a secret key used to sign security tokens. Generate one with `openssl rand -hex 32`.
+* `FIRST_SUPERUSER`: the email address of the first superuser, e.g. `admin@example.com`.
+* `FIRST_SUPERUSER_PASSWORD`: the password of the first superuser. Generate a secure value with `openssl rand -base64 24`.
+* `PROJECT_NAME`: the name of the project, used in the API documentation and emails.
 
-To enable Sentry, configure `SENTRY_DSN`.
+Optional variables:
 
-### Secrets
+* `FRONTEND_HOST`: the URL of the (separate) frontend that will call this API. Used for CORS and for the links inside emails. Defaults to `http://localhost:5173`; set it to your frontend's public URL.
+* `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAILS_FROM_EMAIL`: to enable outgoing emails.
+* `SENTRY_DSN`: to enable Sentry error reporting.
 
-Add these required values and mark them as secrets:
+**Note**: do not set `FASTAPI_ENV` on Railway. It only accepts `development` (used for local runs); setting anything else fails validation and crash-loops the container.
 
-* `SECRET_KEY`: A secret key used to sign security tokens.
-* `FIRST_SUPERUSER_PASSWORD`: The password of the first superuser.
-* `DATABASE_URL`: The PostgreSQL connection URL, configured automatically when using a database integration.
+**Note**: the seed script only creates the superuser if it does not exist yet. Changing `FIRST_SUPERUSER_PASSWORD` later will not update the already-seeded user; update the user through the API or reset the database volume.
 
-To enable emails with an authenticated provider, add `SMTP_PASSWORD` as a secret.
+## Post-Deploy Steps
 
-You can generate secure values for `SECRET_KEY` and `FIRST_SUPERUSER_PASSWORD` with:
+1. In your Railway project, open the **backend** service and generate a public domain (Settings > Networking > Generate Domain).
+2. Set `FRONTEND_HOST` to the public URL of your frontend (or to the backend's own domain if you only need the API reachable for browser-based docs) and redeploy if needed.
+3. Check the interactive API docs at `https://your-domain/docs`.
+
+## CLI Deployment
+
+You can also deploy from your machine with the [Railway CLI](https://docs.railway.app/develop/cli):
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+railway init --name my-project
+railway add -d postgres
+railway add -s backend
+railway variables --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}' \
+  --set "SECRET_KEY=$(openssl rand -hex 32)" \
+  --set "FIRST_SUPERUSER=admin@example.com" \
+  --set "FIRST_SUPERUSER_PASSWORD=$(openssl rand -hex 16)" \
+  --service backend
+railway up --service backend
+railway domain
 ```
 
-## Configure Continuous Deployment
+## Continuous Deployment
 
-The included `.github/workflows/deploy.yml` workflow builds the frontend, prepares the database, and deploys the application whenever changes are pushed to `master`. You can also run it manually from the **Actions** tab.
+Connecting the GitHub repository in Railway enables automatic deploys: every push to the tracked branch builds a new image with the `Dockerfile` and deploys it with the `railway.json` settings (start command, health check, restart policy). Migrations run on every deployment start, so schema changes ship together with the code.
 
-Log in to FastAPI Cloud and configure the [deploy token](https://fastapicloud.com/docs/advanced-features/deploy-tokens/) and application ID as GitHub repository secrets:
+## Local Deployment with Docker Compose
 
-```bash
-uv run fastapi login
-uv run fastapi cloud setup-ci --secrets-only --app-id <your-app-id>
-```
-
-If the GitHub CLI is installed and authenticated, the command configures `FASTAPI_CLOUD_TOKEN` and `FASTAPI_CLOUD_APP_ID` automatically. Otherwise, it prints the values so you can add them in your repository under **Settings** > **Secrets and variables** > **Actions**.
-
-The workflow runs database migrations and creates the first superuser before deploying. In the repository's **Settings** > **Secrets and variables** > **Actions** page, add these repository variables:
-
-* `PROJECT_NAME`
-* `FIRST_SUPERUSER`
-
-Add these repository secrets:
-
-* `DATABASE_URL`
-* `SECRET_KEY`
-* `FIRST_SUPERUSER_PASSWORD`
-
-Use the same values configured in FastAPI Cloud. For `DATABASE_URL`, use the connection URL from your database provider. The database must be reachable from GitHub-hosted runners so the preparation step can connect to it.
-
-The deployment workflow performs these steps:
-
-1. Installs and builds the frontend into `backend/app/frontend`.
-2. Runs `backend/scripts/prestart.sh` to apply database migrations and create the first superuser.
-3. Deploys the project with `uv run fastapi deploy`.
-
-## URLs
-
-Replace `your-app.fastapicloud.dev` with the URL of your FastAPI Cloud application.
-
-Application (frontend and API): `https://your-app.fastapicloud.dev`
-
-Interactive API docs: `https://your-app.fastapicloud.dev/docs`
-
-## Docker Compose
-
-For deployment to your own server, see the [Docker Compose deployment guide](./deployment-docker-compose.md).
-
-## GitHub Repository Automation
-
-Install the following GitHub Apps to enable the included repository automation:
-
-* [Latest Changes](https://github.com/apps/latest-changes) updates `release-notes.md` when a pull request is merged.
-* [PR Push](https://github.com/apps/pr-push) lets the pre-commit workflow push automated fixes to pull request branches.
-* [PR Submit](https://github.com/apps/pr-submit) lets the **Bump pre-commit hooks** and **Prepare Release** workflows create pull requests.
-
-To publish code coverage with [Smokeshow](https://github.com/samuelcolvin/smokeshow), add `SMOKESHOW_AUTH_KEY` as a repository secret.
+For local integration testing you can run the whole stack with Docker Compose (PostgreSQL, Adminer, Mailpit, backend); see [development.md](./development.md).

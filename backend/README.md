@@ -37,16 +37,16 @@ There are already configurations in place to run the backend through the VS Code
 
 The setup is also already configured so you can run the tests through the VS Code Python tests tab.
 
-## Full Stack with Docker Compose
+## Backend with Docker Compose
 
-To run the backend and built frontend in Docker Compose:
+To run the backend in Docker Compose:
 
 ```console
 $ docker compose run --rm backend bash scripts/prestart.sh
 $ docker compose watch
 ```
 
-The application is available at `http://localhost:8000`.
+The API is available at `http://localhost:8000`.
 
 ### Docker Compose Override
 
@@ -126,20 +126,4 @@ If you don't want to start with the default models and want to remove them / mod
 
 ## Email Templates
 
-The email templates are written with [React Email](https://react.email) in `./packages/react-email/`. The `emails` directory holds one component per email and the `ui` directory holds the shared components (layout, heading, button, link, callout).
-
-The rendered HTML in `./backend/app/email-templates/` is generated from those components. It is what the application sends and should not be edited by hand.
-
-To preview the emails while editing them, start the dev server from the root of the project:
-
-```console
-$ bun run email:dev
-```
-
-Values coming from the backend are declared as Jinja placeholders in the component props, for example `username = "{{ username }}"`. The context for each email is built in `generate_*_email()` in `./backend/app/utils.py`, so a new placeholder needs to be added there too.
-
-Once you are done, regenerate the templates used by the application:
-
-```console
-$ bun run email:export
-```
+The email templates are plain HTML files in `./backend/app/email-templates/` with Jinja placeholders, rendered at send time by `generate_*_email()` in `./backend/app/utils.py`. Edit the HTML files directly to change what the application sends.
